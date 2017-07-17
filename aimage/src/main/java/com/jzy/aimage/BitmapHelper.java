@@ -1,4 +1,4 @@
-package com.jzy.aImage.library;
+package com.jzy.aimage;
 
 import android.content.Context;
 import android.graphics.Bitmap;
@@ -15,22 +15,25 @@ import java.io.File;
 import java.io.FileDescriptor;
 import java.io.FileInputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.OutputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.Response;
 
 /**
  * Created by JiangZhuyang on 2017/4/1.
  * <p>
- * 图片缓存技术的核心类，用于缓存所有下载好的图片
- * 在程序内存达到设定值时会将最少最近使用的图片移除掉。
+ * 图片缓存技术的核心类，用于缓存所有下载好的图片，在程序内存达到设定值时会将最少最近使用的图片移除掉。
  */
 
 public class BitmapHelper {
@@ -40,22 +43,23 @@ public class BitmapHelper {
     private LruCache<String, Bitmap> mMemoryCache;
 
     private static ExecutorService mThreadPool;
-    private static Map<ImageView, Future<?>> mTaskTags = new LinkedHashMap<ImageView, Future<?>>();
+    private static Map<String, Future<?>> mTaskTags = new LinkedHashMap<String, Future<?>>();
+
+    private static Map<String, Set<ImageView>> mViewTags = new LinkedHashMap<String, Set<ImageView>>();
+    private static Map<String, Set<ImageLoadListener>> mListenerTags = new LinkedHashMap<String, Set<ImageLoadListener>>();
+
     /**
      * 图片硬盘缓存核心类。
      */
     private LruDiskCache mDiskLruCache;
-
-    //下载外部回调
-    private IDownImageCallBack mListener;
-
-    private Handler mHandler;
 
     private BitmapHelper(Context context) {
         init(context);
     }
 
     private static BitmapHelper instance;
+
+    private OkHttpClient mClient;
 
     /**
      * BitmapUtils不是单例的 根据需要重载多个获取实例的方法
@@ -70,17 +74,17 @@ public class BitmapHelper {
         return instance;
     }
 
-
-    public void initDownListner(IDownImageCallBack listener) {
-        this.mListener = listener;
-    }
+    private Context mContext;
+    private Handler mHandler;
 
     private void init(Context context) {
         if (mThreadPool == null) {
             // 最多同时允许的线程数为3个
             mThreadPool = Executors.newFixedThreadPool(3);
         }
+        mContext = context;
         mHandler = new Handler();
+        mClient = new OkHttpClient();
         // 获取应用程序最大可用内存
         int maxMemory = (int) Runtime.getRuntime().maxMemory();
         int cacheSize = maxMemory / 8;
@@ -91,18 +95,24 @@ public class BitmapHelper {
                 return bitmap.getByteCount();
             }
         };
+        createLruCache();
+    }
+
+    private void createLruCache() {
         try {
             // 获取图片缓存路径
-            File cacheDir = getDiskCacheDir(context, "thumb");
+            File cacheDir = getDiskCacheDir(mContext, "thumb");
             if (!cacheDir.exists()) {
                 cacheDir.mkdirs();
             }
             // 创建DiskLruCache实例，初始化缓存数据
             mDiskLruCache = LruDiskCache
                     .open(cacheDir, 215, 1, MAX_SIZE);
+
         } catch (IOException e) {
             e.printStackTrace();
         }
+
     }
 
     /**
@@ -123,7 +133,7 @@ public class BitmapHelper {
      * @param key LruCache的键，这里传入图片的URL地址。
      * @return 对应传入键的Bitmap对象，或者null。
      */
-    public Bitmap getBitmapFromMemoryCache(String key) {
+    private Bitmap getBitmapFromMemoryCache(String key) {
         return mMemoryCache.get(key);
     }
 
@@ -138,24 +148,60 @@ public class BitmapHelper {
             }
             //先从缓存取
             Bitmap bitmap = getBitmapFromMemoryCache(imageUrl);
+            checkViewTags(imageUrl, imageView);
             if (bitmap == null) {
                 // 开线程去网络获取
                 // 使用线程池管理
                 // 判断是否有线程在为 imageView加载数据
-                Future<?> futrue = mTaskTags.get(imageView);
+                Future<?> futrue = mTaskTags.get(imageUrl);
                 if (futrue != null && !futrue.isCancelled() && !futrue.isDone()) {
                     // 线程正在执行
-                    futrue.cancel(true);
-                    futrue = null;
+//                    futrue.cancel(true);
+//                    futrue = null;
+                    return;
                 }
 
                 // mThreadPool.execute(new ImageLoadTask(iv, url));
                 futrue = mThreadPool.submit(new ImageLoadTask(imageView, imageUrl));
-                mTaskTags.put(imageView, futrue);
+                mTaskTags.put(imageUrl, futrue);
             } else {
-                if (imageView != null && bitmap != null) {
-                    imageView.setImageBitmap(bitmap);
+                //从hashset里面取值
+                setBitmap(imageUrl, bitmap);
+                notifyBitMap(imageUrl, bitmap);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+
+    public void getBitMap(String imageUrl, ImageLoadListener listener) {
+        try {
+            if (TextUtils.isEmpty(imageUrl)) {
+                return;
+            }
+            //先从缓存取
+            Bitmap bitmap = getBitmapFromMemoryCache(imageUrl);
+            checkListenerTags(imageUrl, listener);
+            if (bitmap == null) {
+                // 开线程去网络获取
+                // 使用线程池管理
+                // 判断是否有线程在为 imageView加载数据
+                Future<?> futrue = mTaskTags.get(imageUrl);
+                if (futrue != null && !futrue.isCancelled() && !futrue.isDone()) {
+                    // 线程正在执行
+//                    futrue.cancel(true);
+//                    futrue = null;
+                    return;
                 }
+
+//                mThreadPool.execute(new ImageLoadTask(iv, url));
+                futrue = mThreadPool.submit(new ImageLoadTask(listener, imageUrl));
+                mTaskTags.put(imageUrl, futrue);
+            } else {
+                setBitmap(imageUrl, bitmap);
+                //从hashset里面取值
+                notifyBitMap(imageUrl, bitmap);
             }
         } catch (Exception e) {
             e.printStackTrace();
@@ -168,12 +214,14 @@ public class BitmapHelper {
     public void cancelAllTasks() {
         try {
             if (mTaskTags != null) {
-                for (Map.Entry<ImageView, Future<?>> entry : mTaskTags.entrySet()) {
+                for (Map.Entry<String, Future<?>> entry : mTaskTags.entrySet()) {
                     Future<?> futrue = entry.getValue();
                     futrue.cancel(true);
                     futrue = null;
                 }
                 mTaskTags.clear();
+                mViewTags.clear();
+                mListenerTags.clear();
             }
         } catch (Exception e) {
             e.printStackTrace();
@@ -198,7 +246,7 @@ public class BitmapHelper {
     /**
      * 使用MD5算法对传入的key进行加密并返回。
      */
-    public String hashKeyForDisk(String key) {
+    private String hashKeyForDisk(String key) {
         String cacheKey;
         try {
             final MessageDigest mDigest = MessageDigest.getInstance("MD5");
@@ -243,10 +291,16 @@ public class BitmapHelper {
 
         private String mUrl;
         private ImageView iv;
+        private ImageLoadListener mLister;
 
         public ImageLoadTask(ImageView iv, String url) {
             this.mUrl = url;
             this.iv = iv;
+        }
+
+        public ImageLoadTask(ImageLoadListener listener, String url) {
+            this.mUrl = url;
+            this.mLister = listener;
         }
 
         @Override
@@ -260,6 +314,9 @@ public class BitmapHelper {
             try {
                 // 生成图片URL对应的key
                 final String key = hashKeyForDisk(mUrl);
+                if (mDiskLruCache == null || mDiskLruCache.isClosed()) {
+                    createLruCache();
+                }
                 // 查找key对应的缓存
                 snapShot = mDiskLruCache.get(key);
                 if (snapShot == null) {
@@ -288,13 +345,17 @@ public class BitmapHelper {
                 if (bitmap != null) {
                     // 将Bitmap对象添加到内存缓存当中
                     addBitmapToMemoryCache(mUrl, bitmap);
-                    mTaskTags.remove(iv);
+                    mTaskTags.remove(mUrl);
                     // 图片显示
                     mHandler.post(new Runnable() {
 
                         @Override
                         public void run() {
-                            display(iv, mUrl);
+                            if (iv != null) {
+                                display(iv, mUrl);
+                            } else {
+                                getBitMap(mUrl, mLister);
+                            }
                         }
                     });
                 }
@@ -308,17 +369,18 @@ public class BitmapHelper {
             BufferedOutputStream out = null;
             BufferedInputStream in = null;
             try {
-                if (mListener != null) {
-                    InputStream inputStream = mListener.getStream(mUrl);
-                    if (inputStream != null) {
-                        in = new BufferedInputStream(mListener.getStream(mUrl), 8 * 1024);
-                        out = new BufferedOutputStream(outputStream, 8 * 1024);
-                        int b;
-                        while ((b = in.read()) != -1) {
-                            out.write(b);
-                        }
-                        return true;
+                Request request = new Request.Builder().url(mUrl).build();
+                Response response = mClient.newCall(request).execute();
+
+                if (response.isSuccessful()) {
+
+                    in = new BufferedInputStream(response.body().byteStream(), 8 * 1024);
+                    out = new BufferedOutputStream(outputStream, 8 * 1024);
+                    int b;
+                    while ((b = in.read()) != -1) {
+                        out.write(b);
                     }
+                    return true;
                 }
             } catch (final IOException e) {
                 e.printStackTrace();
@@ -336,5 +398,71 @@ public class BitmapHelper {
             }
             return false;
         }
+    }
+
+    private void checkViewTags(String url, ImageView view) {
+        Set<ImageView> viewList = mViewTags.get(url);
+        if (viewList == null) {
+            viewList = new LinkedHashSet<ImageView>();
+            mViewTags.put(url, viewList);
+        }
+        viewList.add(view);
+    }
+
+    private void checkListenerTags(String url, ImageLoadListener listener) {
+        Set<ImageLoadListener> listenerList = mListenerTags.get(url);
+        if (listenerList == null) {
+            listenerList = new LinkedHashSet<ImageLoadListener>();
+            mListenerTags.put(url, listenerList);
+        }
+        listenerList.add(listener);
+    }
+
+    private void setBitmap(String url, Bitmap bm) {
+        try {
+            if (bm == null) {
+                return;
+            }
+            Set<ImageView> viewList = mViewTags.get(url);
+            if (viewList == null) {
+                return;
+            }
+
+            for (ImageView imgView : viewList) {
+                if (imgView != null) {
+                    imgView.setImageBitmap(bm);
+                }
+            }
+            viewList.clear();
+            mViewTags.remove(url);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void notifyBitMap(String url, Bitmap bm) {
+        try {
+            if (bm == null) {
+                return;
+            }
+            Set<ImageLoadListener> listenerList = mListenerTags.get(url);
+            if (listenerList == null) {
+                return;
+            }
+
+            for (ImageLoadListener listener : listenerList) {
+                if (listener != null) {
+                    listener.onLoad(bm);
+                }
+            }
+            listenerList.clear();
+            mListenerTags.remove(url);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    public interface ImageLoadListener {
+        void onLoad(Bitmap bm);
     }
 }

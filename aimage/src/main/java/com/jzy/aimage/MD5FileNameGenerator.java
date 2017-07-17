@@ -1,8 +1,13 @@
-package com.jzy.aImage.library;
+package com.jzy.aimage;
 
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 
+/**
+ * Author: wyouflf
+ * Date: 14-5-16
+ * Time: 上午11:25
+ */
 public class MD5FileNameGenerator  {
     public MD5FileNameGenerator() {
     }

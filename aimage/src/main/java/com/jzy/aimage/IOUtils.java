@@ -13,7 +13,7 @@
  * limitations under the License.
  */
 
-package com.jzy.aImage.library;
+package com.jzy.aimage;
 
 import android.database.Cursor;
 

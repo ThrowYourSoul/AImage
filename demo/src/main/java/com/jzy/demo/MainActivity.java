@@ -1,11 +1,11 @@
 package com.jzy.demo;
 
+import android.graphics.Bitmap;
 import android.os.Bundle;
 import android.support.v7.app.AppCompatActivity;
 import android.widget.ImageView;
 
-import com.jzy.aImage.library.BitmapHelper;
-import com.jzy.aImage.library.IDownImageCallBack;
+import com.jzy.aimage.BitmapHelper;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -16,23 +16,36 @@ import okhttp3.Request;
 import okhttp3.Response;
 
 public class MainActivity extends AppCompatActivity {
-    private ImageView img;
+    private ImageView img, img1;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         img = (ImageView) findViewById(R.id.img);
+        img1 = (ImageView) findViewById(R.id.img1);
 
         BitmapHelper helper = BitmapHelper.getInstance(MainActivity.this);
-        helper.initDownListner(new IDownImageCallBack() {
+//        helper.initDownListner(new IDownImageCallBack() {
+//            @Override
+//            public InputStream getStream(String url) {
+//                return getDownStream(url);
+//            }
+//        });
+
+//        helper.display(img, "http://img.ivsky.com/img/tupian/slides/201707/02/hubo-007.jpg");
+        helper.getBitMap("http://img.ivsky.com/img/tupian/slides/201707/02/hubo-007.jpg", new BitmapHelper.ImageLoadListener() {
             @Override
-            public InputStream getStream(String url) {
-                return getDownStream(url);
+            public void onLoad(Bitmap bm) {
+                img.setImageBitmap(bm);
             }
         });
-
-        helper.display(img, "https://timgsa.baidu.com/timg?image&quality=80&size=b9999_10000&sec=1491985886&di=a125887cafaebdd9d56597fb24209333&imgtype=jpg&er=1&src=http%3A%2F%2Fs4.51cto.com%2Fwyfs02%2FM02%2F70%2F81%2FwKioL1W5e5GQU3qEAAEXNvlEskQ360.jpg-wh_651x363-s_2834990474.jpg");
+        helper.getBitMap("http://img.ivsky.com/img/tupian/slides/201707/02/hubo-007.jpg", new BitmapHelper.ImageLoadListener() {
+            @Override
+            public void onLoad(Bitmap bm) {
+                img1.setImageBitmap(bm);
+            }
+        });
 
     }
 

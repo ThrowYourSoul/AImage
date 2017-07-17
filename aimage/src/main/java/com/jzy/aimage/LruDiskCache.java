@@ -1,3 +1,4 @@
+
 /*
  * Copyright (c) 2013. wyouflf (wyouflf@gmail.com)
  *
@@ -13,7 +14,7 @@
  * limitations under the License.
  */
 
-package com.jzy.aImage.library;
+package com.jzy.aimage;
 
 import java.io.BufferedWriter;
 import java.io.ByteArrayOutputStream;
